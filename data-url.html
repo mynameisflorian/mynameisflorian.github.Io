@@ -12,13 +12,11 @@
     </style>
   </head>
   <script>
-    window.addEventListener("hashchange", ()=>{
+    function updateURL(){
       document.querySelector("iframe").src = window.location.hash;
-    });
-    
-    window.addEventListener("load", ()=>{
-      window.location.hash += "";
-    });
+    }
+    window.addEventListener("hashchange", updateURL);
+    window.addEventListener("load", updateURL);
   </script>
   <body>
     <iframe src="data:,Add a data url as a %23fragment to the url -- example: %23data:,meow"></iframe>
