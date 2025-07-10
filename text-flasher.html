@@ -135,9 +135,10 @@
         
         // --- RENDERER CLASS ---
         class JavascriptRenderer {
-            constructor(config, displayElement) {
+            constructor(config, displayElement, originView) {
                 this.config = config;
                 this.displayElement = displayElement;
+                this.originView = originView; // 'go' or 'editor'
                 this.items = this.prepareItems();
                 this.stopped = false;
                 this.currentIndex = 0;
@@ -255,7 +256,7 @@
             showToast("Link copied to clipboard!");
         }
 
-        function startFlasher() {
+        function startFlasher(originView) {
             readInputsToConfig();
             if (!flasherConfig.text) return;
             
@@ -264,7 +265,7 @@
             function checkLayoutAndStart() {
                 if (flasherView.clientWidth > 0) {
                     calculateAndSetMaxFontSize();
-                    activeRenderer = new JavascriptRenderer(flasherConfig, charDisplay);
+                    activeRenderer = new JavascriptRenderer(flasherConfig, charDisplay, originView);
                     activeRenderer.start();
                 } else {
                     requestAnimationFrame(checkLayoutAndStart);
@@ -276,11 +277,21 @@
 
         function stopFlasher() {
             if (activeRenderer) {
+                const origin = activeRenderer.originView;
                 activeRenderer.stop();
                 activeRenderer.cleanup();
                 activeRenderer = null;
+
+                if (origin === 'editor') {
+                    body.className = 'bg-gray-900 view-controller view-editor';
+                } else {
+                    body.className = 'bg-black view-controller view-go';
+                }
+            } else {
+                 // Fallback if flasher is stopped without an active renderer
+                 // This can happen if the user clicks while the view is transitioning
+                 handleUrlNavigation(); // Re-evaluate the view based on the URL
             }
-            body.className = window.location.hash ? 'bg-black view-controller view-go' : 'bg-gray-900 view-controller view-editor';
         }
 
         function showToast(message) {
@@ -316,6 +327,7 @@
 
         function handleUrlNavigation() {
             const hash = window.location.hash.substring(1);
+
             if (hash) {
                 try {
                     const decoded = decodeURIComponent(escape(atob(hash)));
@@ -341,13 +353,17 @@
              speedLabel.textContent = `Speed (${flashLettersCheckbox.checked ? 'Letters' : 'Words'} Per Minute)`;
         });
         
-        previewBtn.addEventListener('click', startFlasher);
+        previewBtn.addEventListener('click', () => startFlasher('editor'));
         generateLinkBtn.addEventListener('click', generateLink);
-        goBtn.addEventListener('click', startFlasher);
+        goBtn.addEventListener('click', () => startFlasher('go'));
         fullscreenBtn.addEventListener('click', toggleFullscreen);
         fullscreenBtnEditor.addEventListener('click', toggleFullscreen);
         flasherView.addEventListener('click', stopFlasher);
-        editLink.addEventListener('click', (e) => { e.preventDefault(); body.className = 'bg-gray-900 view-controller view-editor'; });
+        editLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            // Directly change the view instead of using the hash
+            body.className = 'bg-gray-900 view-controller view-editor';
+        });
         
         // --- Initialization ---
         window.addEventListener('load', handleUrlNavigation);
