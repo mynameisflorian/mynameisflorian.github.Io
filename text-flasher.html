@@ -56,7 +56,8 @@
 
     <!-- Editor View -->
     <div id="editor-view" class="view min-h-screen w-full flex-col items-center justify-center p-4 relative">
-        <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-4">
+        <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-4 relative">
+            <button id="close-editor-btn" class="absolute top-4 right-4 text-gray-500 hover:text-white text-3xl leading-none">&times;</button>
             <h1 class="text-3xl font-bold text-white text-center">Text Flasher</h1>
             <div>
                 <label for="text-input" class="block text-sm font-medium text-gray-300 mb-2">Your Message</label>
@@ -121,6 +122,7 @@
         const punctuationPauseCheckbox = document.getElementById('punctuation-pause-checkbox');
         const generateLinkBtn = document.getElementById('generate-link-btn');
         const previewBtn = document.getElementById('preview-btn');
+        const closeEditorBtn = document.getElementById('close-editor-btn');
         const goBtn = document.getElementById('go-btn');
         const editLink = document.getElementById('edit-link');
         const fullscreenBtn = document.getElementById('fullscreen-btn');
@@ -260,7 +262,7 @@
             readInputsToConfig();
             if (!flasherConfig.text) return;
             
-            body.className = 'bg-black view-controller view-flasher';
+            setView('flasher');
             
             function checkLayoutAndStart() {
                 if (flasherView.clientWidth > 0) {
@@ -283,14 +285,19 @@
                 activeRenderer = null;
 
                 if (origin === 'editor') {
-                    body.className = 'bg-gray-900 view-controller view-editor';
+                    setView('editor');
                 } else {
-                    body.className = 'bg-black view-controller view-go';
+                    setView('go');
                 }
             } else {
-                 // Fallback if flasher is stopped without an active renderer
-                 // This can happen if the user clicks while the view is transitioning
-                 handleUrlNavigation(); // Re-evaluate the view based on the URL
+                 handleUrlNavigation();
+            }
+        }
+        
+        function setView(viewName) {
+            body.className = `bg-gray-900 view-controller view-${viewName}`;
+            if (viewName === 'go' || viewName === 'flasher') {
+                 body.classList.add('bg-black');
             }
         }
 
@@ -327,7 +334,7 @@
 
         function handleUrlNavigation() {
             const hash = window.location.hash.substring(1);
-
+            
             if (hash) {
                 try {
                     const decoded = decodeURIComponent(escape(atob(hash)));
@@ -336,16 +343,19 @@
                         const defaults = { flashLetters: false, longPunc: true, longSpace: true, repeat: false, lpm: 240 };
                         Object.assign(flasherConfig, defaults, data);
                         setUiFromConfig(flasherConfig);
-                        body.className = 'bg-black view-controller view-go';
+                        setView('go');
                         return;
                     }
-                } catch (e) { console.error("Failed to parse hash:", e); window.location.hash = ''; }
+                } catch (e) { 
+                    console.error("Failed to parse hash:", e);
+                }
             }
             
+            // Default state for empty/invalid hash
             const defaultConfig = { text: DEFAULT_MESSAGE, lpm: 240, repeat: false, flashLetters: false, longPunc: true, longSpace: true };
             Object.assign(flasherConfig, defaultConfig);
             setUiFromConfig(flasherConfig);
-            body.className = 'bg-black view-controller view-go';
+            setView('go');
         }
 
         // --- Event Listeners ---
@@ -359,10 +369,14 @@
         fullscreenBtn.addEventListener('click', toggleFullscreen);
         fullscreenBtnEditor.addEventListener('click', toggleFullscreen);
         flasherView.addEventListener('click', stopFlasher);
+        
         editLink.addEventListener('click', (e) => {
             e.preventDefault();
-            // Directly change the view instead of using the hash
-            body.className = 'bg-gray-900 view-controller view-editor';
+            setView('editor');
+        });
+
+        closeEditorBtn.addEventListener('click', () => {
+            setView('go');
         });
         
         // --- Initialization ---
