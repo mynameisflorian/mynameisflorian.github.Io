@@ -362,6 +362,9 @@
         }
 
         // --- Event Listeners ---
+        speedSlider.addEventListener('input', (e) => { speedInput.value = e.target.value; });
+        speedInput.addEventListener('input', (e) => { speedSlider.value = e.target.value; });
+
         flashLettersCheckbox.addEventListener('change', () => {
              speedLabel.textContent = `Speed (${flashLettersCheckbox.checked ? 'Letters' : 'Words'} Per Minute)`;
         });
