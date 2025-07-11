@@ -10,12 +10,14 @@
         body {
             font-family: 'Inter', sans-serif;
             transition: background-color 0.3s;
-            overscroll-behavior: none;
+            overscroll-behavior: none; /* Prevents pull-to-refresh on mobile */
         }
+        /* Hide number input spinners */
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type=number] { -moz-appearance: textfield; }
 
+        /* Custom slider styles */
         .slider-thumb::-webkit-slider-thumb {
             -webkit-appearance: none; appearance: none; width: 24px; height: 24px;
             background: #3b82f6; cursor: pointer; border-radius: 50%;
@@ -132,26 +134,38 @@
         const toastNotification = document.getElementById('toast-notification');
 
         // --- GLOBAL STATE ---
-        let activeRenderer = null;
+        let activeFlasher = null;
         let flasherConfig = { text: '', lpm: 240, repeat: false, flashLetters: false, longPunc: true, longSpace: true };
         
-        // --- RENDERER CLASS ---
-        class JavascriptRenderer {
-            constructor(config, displayElement, originView) {
+        // --- TEXT FLASHER LOGIC ---
+        const flasher = {
+            timeout1: null,
+            timeout2: null,
+            currentIndex: 0,
+            items: [],
+            stopped: false,
+            originView: 'go',
+
+            start(config, displayElement, origin) {
                 this.config = config;
                 this.displayElement = displayElement;
-                this.originView = originView; // 'go' or 'editor'
+                this.originView = origin;
                 this.items = this.prepareItems();
                 this.stopped = false;
                 this.currentIndex = 0;
-                this.timeout1 = null;
-                this.timeout2 = null;
-            }
+                this.flashNext();
+            },
+
+            stop() {
+                this.stopped = true;
+                clearTimeout(this.timeout1);
+                clearTimeout(this.timeout2);
+            },
 
             prepareItems() {
                 const cleanedText = this.config.text.trim().replace(/\s+/g, ' ');
                 return this.config.flashLetters ? cleanedText.split('') : cleanedText.split(' ');
-            }
+            },
 
             getBeats(item) {
                 if (item === ' ') return this.config.longSpace ? 2 : 1;
@@ -160,17 +174,7 @@
                     return 2;
                 }
                 return 1;
-            }
-
-            start() { this.flashNext(); }
-            
-            stop() {
-                this.stopped = true;
-                clearTimeout(this.timeout1);
-                clearTimeout(this.timeout2);
-            }
-
-            cleanup() { this.displayElement.innerHTML = ''; }
+            },
 
             flashNext() {
                 if (this.stopped || this.items.length === 0) {
@@ -197,7 +201,7 @@
                     this.timeout2 = setTimeout(() => this.flashNext(), gapDuration);
                 }, charDuration);
             }
-        }
+        };
 
         // --- MAIN APP FLOW ---
         const debounce = (func, delay) => {
@@ -267,8 +271,8 @@
             function checkLayoutAndStart() {
                 if (flasherView.clientWidth > 0) {
                     calculateAndSetMaxFontSize();
-                    activeRenderer = new JavascriptRenderer(flasherConfig, charDisplay, originView);
-                    activeRenderer.start();
+                    activeFlasher = flasher;
+                    activeFlasher.start(flasherConfig, charDisplay, originView);
                 } else {
                     requestAnimationFrame(checkLayoutAndStart);
                 }
@@ -278,11 +282,10 @@
         }
 
         function stopFlasher() {
-            if (activeRenderer) {
-                const origin = activeRenderer.originView;
-                activeRenderer.stop();
-                activeRenderer.cleanup();
-                activeRenderer = null;
+            if (activeFlasher) {
+                const origin = activeFlasher.originView;
+                activeFlasher.stop();
+                activeFlasher = null;
 
                 if (origin === 'editor') {
                     setView('editor');
