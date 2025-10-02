@@ -1,0 +1,80 @@
+<!doctype HTML>
+    <html>
+      <head>
+        <title>π</title>
+        <style>body{
+text-align: center;
+}
+
+#display{
+font-size: 60vh;
+animation: pow .1s;
+display:inline-block;
+caret-color: transparent;
+outline:none;
+}
+
+.pow{
+	animation: pow .5s;
+}
+
+.invalid{
+	color: red;
+}
+
+.valid{
+	color: green;
+}
+
+@keyframes pow{
+0%{
+	transform: scale(100%);
+	color: green;
+}
+50%{
+	transform: scale(120%);
+	filter: invert(50%) blur(15px);
+}
+100%{
+	transform: scale(100%);
+	color: green;
+}
+}</style>
+        <script type="module" id="script">const pi = Array.from("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651328230664709384460955058223172535940812848111745028410270193852110555964462294895493038196442881097566593344612847564823378678316527120190914564856692346034861045432664821339360726024914127372458700660631558817488152092096282925409171536436789259036001133053054882046652138414695194151160943305727036575959195309218611738193261179310511854807446237996274956735188575272489122793818301194912");
+const display=document.querySelector("#display");
+const maxCountDisplay=document.querySelector("#max-count-display");
+let index = 0;
+let count = 0;
+let maxCount = 0;
+document.body.addEventListener("keydown", e=>{
+e.preventDefault();
+e.stopPropagation();
+if(e.key == pi[index]){
+	display.className = "valid";
+	display.textContent = e.key;
+	display.style.animation="none";
+	window.setTimeout(()=>{display.style.animation="";},10);
+	if(e.key != "."){
+		count++;
+	}
+	if(count > maxCount){
+		maxCount=count;
+		maxCountDisplay.textContent = maxCount;
+	}
+	index++;
+}
+else if(e.key.length == 1){
+	display.textContent = pi[index];
+	display.className = "invalid";
+	index=0;
+	count=0;
+}
+});</script>
+      </head>
+      <body>
+        <h1>Do you even know π?</h1>
+<h2>You only know <span id="max-count-display">0</span> digits. Learn more!</h2>
+<div id="display" style="animation:none" contenteditable inputmode="numeric">3</div>
+      </body>
+    </html>
+  
