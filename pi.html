@@ -56,6 +56,10 @@ let maxCount = 0;
 document.body.addEventListener("keydown", e=>{
 e.preventDefault();
 e.stopPropagation();
+if(pi[index] == "." && e.key != pi[index]){
+index++
+}
+
 if(e.key == pi[index]){
 	display.className = "valid";
 	display.textContent = e.key;
