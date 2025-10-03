@@ -57,8 +57,12 @@ let index = 0;
 let count = 0;
 let maxCount = 0;
 let LS = null;
-
-setTimeout(()=>{if(localStorage){LS=window.localstorage; maxCount = LS.getItem("piCount")||0;}},0);
+try{
+	LS = window.localstorage;
+	maxCount = window.localstorage.getItem("piCount") || 0;
+}catch(err){
+	console.log(`no localstorage. reason: ${err}`);
+}
 
 document.body.addEventListener("keydown", e=>{
 e.preventDefault();
