@@ -49,12 +49,17 @@ line-height: 55vh;
 }
 }</style>
         <script type="module" id="script">const pi = Array.from("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651328230664709384460955058223172535940812848111745028410270193852110555964462294895493038196442881097566593344612847564823378678316527120190914564856692346034861045432664821339360726024914127372458700660631558817488152092096282925409171536436789259036001133053054882046652138414695194151160943305727036575959195309218611738193261179310511854807446237996274956735188575272489122793818301194912");
-const display=document.querySelector("#display");
-display.focus();
-const maxCountDisplay=document.querySelector("#max-count-display");
+const $ = document.querySelector.bind(document);
+
+$("#display").focus();
+
 let index = 0;
 let count = 0;
 let maxCount = 0;
+let LS = null;
+
+setTimeout(()=>{if(localStorage){LS=window.localstorage; maxCount = LS.getItem("piCount")||0;}},0);
+
 document.body.addEventListener("keydown", e=>{
 e.preventDefault();
 e.stopPropagation();
@@ -63,22 +68,23 @@ index++
 }
 
 if(e.key == pi[index]){
-	display.className = "valid";
-	display.textContent = e.key;
-	display.style.animation="none";
-	window.setTimeout(()=>{display.style.animation="";},20);
+	$("#display").className = "valid";
+	$("#display").textContent = e.key;
+	$("#display").style.animation="none";
+	window.setTimeout(()=>{$("#display").style.animation="";},20);
 	if(e.key != "."){
 		count++;
 	}
 	if(count > maxCount){
 		maxCount=count;
-		maxCountDisplay.textContent = maxCount;
+		$("#max-count-display").textContent = maxCount;
+		if(LS){LS.setItem("piCount",maxCount);}
 	}
 	index++;
 }
 else if(e.key.length == 1){
-	display.textContent = pi[index];
-	display.className = "invalid";
+	$("#display").textContent = pi[index];
+	$("#display").className = "invalid";
 	index=0;
 	count=0;
 }
