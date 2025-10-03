@@ -60,6 +60,7 @@ let LS = null;
 try{
 	LS = window.localStorage;
 	maxCount = window.localStorage.getItem("piCount") || 0;
+	$("#max-count-display").textContent = maxCount;
 }catch(err){
 	console.log(`no localStorage. reason: ${err}`);
 }
