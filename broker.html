@@ -1,0 +1,157 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>broker</title>
+<p id=s>broker</p>
+<script id="reg" type="application/json">{"test":{"jwk":{"alg":"ES256","crv":"P-256","ext":true,"key_ops":["verify"],"kty":"EC","x":"aN7MCK6k1_Iu7KkFJxXpTpugRxIREDAtAD5Fo1a-3yc","y":"JpnN7Fpcaeh2mX5jTVzyHx2fAOqe72SKpbTg1Wu8kQA"}}}</script>
+<script>
+(() => {
+'use strict';
+const REG = new Map(Object.entries(JSON.parse(document.getElementById('reg').textContent)));
+document.getElementById('s').textContent = 'broker: ' + REG.size + ' client(s)';
+const enc = new TextEncoder();
+const pending = new WeakMap();
+const pubKeys = new Map();
+
+async function pubKey(id) {
+  if (!pubKeys.has(id)) {
+    pubKeys.set(id, await crypto.subtle.importKey('jwk', REG.get(id).jwk,
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']));
+  }
+  return pubKeys.get(id);
+}
+
+// ---- per-client storage: one IndexedDB database per authenticated id ----
+const dbs = new Map();
+function db(id) {
+  if (!dbs.has(id)) {
+    dbs.set(id, new Promise((res, rej) => {
+      const r = indexedDB.open('ns:' + id, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    }));
+  }
+  return dbs.get(id);
+}
+async function kv(id, op, a, b) {
+  if (op !== 'keys' && typeof a !== 'string') throw new Error('key must be a string');
+  const d = await db(id);
+  return new Promise((res, rej) => {
+    const tx = d.transaction('kv', op === 'get' || op === 'keys' ? 'readonly' : 'readwrite');
+    const s = tx.objectStore('kv');
+    let r;
+    if (op === 'get') r = s.get(a);
+    else if (op === 'set') r = s.put(b, a);
+    else if (op === 'del') r = s.delete(a);
+    else if (op === 'keys') r = s.getAllKeys();
+    else { rej(new Error('bad op')); return; }
+    tx.oncomplete = () => res(op === 'get' || op === 'keys' ? r.result : undefined);
+    tx.onerror = tx.onabort = () => rej(tx.error);
+  });
+}
+
+// ---- code that runs inside the sandboxed (opaque-origin) iframe ----
+const BOOT = '<script>(' + (function () {
+  addEventListener('message', function (e) {
+    var p = e.ports[0];
+    if (!p) return;
+    var pend = new Map(), n = 0;
+    function call(op, a, b) {
+      return new Promise(function (res, rej) {
+        var rid = ++n;
+        pend.set(rid, { res: res, rej: rej });
+        p.postMessage({ t: 'kv', rid: rid, op: op, a: a, b: b });
+      });
+    }
+    var bridge = {
+      storage: {
+        get: function (k) { return call('get', k); },
+        set: function (k, v) { return call('set', k, v); },
+        del: function (k) { return call('del', k); },
+        keys: function () { return call('keys'); }
+      },
+      send: function (d) { p.postMessage({ t: 'out', data: d }); },
+      onmessage: null
+    };
+    p.onmessage = function (ev) {
+      var m = ev.data;
+      if (m.t === 'r') {
+        var q = pend.get(m.rid);
+        pend.delete(m.rid);
+        if (q) { if (m.err) q.rej(new Error(m.err)); else q.res(m.v); }
+      } else if (m.t === 'msg' && bridge.onmessage) bridge.onmessage(m.data);
+    };
+    var AF = Object.getPrototypeOf(async function () {}).constructor;
+    try {
+      new AF('bridge', e.data.code)(bridge).catch(function (x) {
+        p.postMessage({ t: 'err', msg: String((x && x.stack) || x) });
+      });
+    } catch (x) { p.postMessage({ t: 'err', msg: String(x) }); }
+  }, { once: true });
+}).toString() + ')()</scr' + 'ipt>';
+
+// ---- one authenticated session ----
+function serve(port, id) {
+  let frame = null, sbPort = null;
+  const reply = (p, rid, v, err) => p.postMessage(err ? { t: 'r', rid, err: String(err) } : { t: 'r', rid, v });
+  const handleKv = async (p, q) => {
+    try { reply(p, q.rid, await kv(id, q.op, q.a, q.b)); }
+    catch (x) { reply(p, q.rid, null, (x && x.message) || x); }
+  };
+  function run(code) {
+    if (frame) frame.remove();
+    if (sbPort) sbPort.close();
+    const ch = new MessageChannel();
+    const mine = sbPort = ch.port1;
+    mine.onmessage = e => {
+      const q = e.data;
+      if (!q || typeof q !== 'object') return;
+      if (q.t === 'kv') handleKv(mine, q);
+      else if (q.t === 'out') port.postMessage({ t: 'msg', data: q.data });
+      else if (q.t === 'err') port.postMessage({ t: 'err', msg: q.msg });
+    };
+    const f = document.createElement('iframe');
+    f.setAttribute('sandbox', 'allow-scripts');   // no allow-same-origin: opaque origin, no access to this page
+    f.style.display = 'none';
+    f.srcdoc = BOOT;
+    f.onload = () => f.contentWindow.postMessage({ code }, '*', [ch.port2]);
+    document.body.append(f);
+    frame = f;
+  }
+  port.onmessage = e => {
+    const q = e.data;
+    if (!q || typeof q !== 'object') return;
+    if (q.t === 'kv') handleKv(port, q);
+    else if (q.t === 'run' && typeof q.code === 'string') run(q.code);
+    else if (q.t === 'send' && sbPort) sbPort.postMessage({ t: 'msg', data: q.data });
+  };
+}
+
+// ---- handshake ----
+addEventListener('message', async e => {
+  const m = e.data, src = e.source;
+  if (!src || !m || typeof m !== 'object') return;
+  if (m.t === 'hello') {
+    const nonce = crypto.getRandomValues(new Uint8Array(32));
+    pending.set(src, { nonce, at: Date.now() });
+    src.postMessage({ t: 'challenge', nonce }, '*');
+  } else if (m.t === 'auth') {
+    const p = pending.get(src);
+    pending.delete(src);                           // nonce is single-use
+    let ok = false;
+    try {
+      if (p && Date.now() - p.at < 30000 && typeof m.id === 'string' && REG.has(m.id) && m.sig instanceof ArrayBuffer) {
+        const head = enc.encode('cbroker1|' + location.origin + '|' + m.id + '|');
+        const msg = new Uint8Array(head.length + p.nonce.length);
+        msg.set(head); msg.set(p.nonce, head.length);
+        ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, await pubKey(m.id), m.sig, msg);
+      }
+    } catch (_) { ok = false; }
+    if (!ok) { src.postMessage({ t: 'fail' }, '*'); return; }
+    const ch = new MessageChannel();
+    serve(ch.port1, m.id);                         // namespace comes from the verified id only
+    src.postMessage({ t: 'ok' }, '*', [ch.port2]);
+  }
+});
+})();
+</script>
