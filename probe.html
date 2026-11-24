@@ -1,0 +1,221 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>broker probe</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; max-width: 760px; margin: 1rem auto; padding: 0 .8rem }
+  input, button { font: inherit }
+  input[type=url], input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: .35rem; margin: .2rem 0 }
+  button { margin: .15rem .1rem; padding: .3rem .6rem }
+  pre { background: #f2f2f2; padding: .6rem; white-space: pre-wrap; word-break: break-all; font-size: 12px }
+  h2 { font-size: 1rem; margin: 1.2rem 0 .3rem }
+  small { color: #555 }
+  .hide { display: none }
+</style>
+</head><body>
+<div id=local>
+  <h1>broker probe</h1>
+  <small>Run as file://, as a bookmarked data: URL, and with a copy hosted on your broker origin. Reload a few times: storage counters should climb if storage persists.</small>
+
+  <h2>1. Automatic tests</h2>
+  <button id=again>Re-run</button> <button id=copy>Copy results JSON</button>
+  <pre id=out>running...</pre>
+
+  <h2>2. Tests that need a tap</h2>
+  <button data-g=clipWrite>clipboard write</button>
+  <button data-g=clipRead>clipboard read</button>
+  <button data-g=geo>geolocation</button>
+  <button data-g=cam>camera</button>
+  <button data-g=notif>notification</button>
+  <button data-g=midi>MIDI</button>
+  <button data-g=wake>wake lock</button>
+  <button data-g=webauthn>WebAuthn</button>
+  <button data-g=filePick>file picker</button>
+  <button data-g=persist>persist storage</button>
+
+  <h2>3. Hosted iframe (broker-origin) test</h2>
+  <small>Upload this same file to your GitHub Pages repo, then put its URL here.</small>
+  <input id=frameUrl type=url placeholder="https://USER.github.io/REPO/probe.html">
+  <button id=embed>Run embedded test</button>
+  <button id=mkdata>Copy as data: URL (with this frame URL baked in)</button>
+  <div id=frameBox></div>
+
+  <h2>4. Password manager test</h2>
+  <small>Submit, then see whether the browser offers to save. Reload and see whether it offers to fill.</small>
+  <form id=login autocomplete=on>
+    <input type=text name=username autocomplete=username placeholder=username>
+    <input type=password name=password autocomplete=current-password placeholder=password>
+    <button>Log in</button>
+  </form>
+</div>
+
+<div id=framed class=hide>
+  <p>probe (hosted frame mode) <span id=fo></span></p>
+  <form autocomplete=on onsubmit="event.preventDefault()">
+    <input type=text name=username autocomplete=username placeholder="username (in frame)">
+    <input type=password name=password autocomplete=current-password placeholder="password (in frame)">
+    <button>Log in</button>
+  </form>
+</div>
+
+<script>
+'use strict';
+const SRC = '<!doctype html>\n' + document.documentElement.outerHTML;   // captured before any DOM changes
+const FRAME_DEFAULT = "";
+const $ = id => document.getElementById(id);
+const R = { results: {} };
+
+const settle = (p, ms = 4000) => Promise.race([p, new Promise(r => setTimeout(() => r('timeout'), ms))]);
+async function t(k, f) {
+  try { const v = await settle(Promise.resolve().then(f)); return [k, v]; }
+  catch (e) { return [k, 'ERR ' + e.name + ': ' + String(e.message).slice(0, 80)]; }
+}
+
+// ---- API availability (no user gesture) ----
+async function apiTests() {
+  const L = [
+    ['isSecureContext', () => self.isSecureContext],
+    ['origin', () => self.origin],
+    ['crypto.subtle', () => typeof crypto.subtle],
+    ['subtle.Ed25519', async () => (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign'])) && 'ok'],
+    ['subtle.wrap nonextractable', async () => {
+      const k = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']); return k.privateKey.extractable === false ? 'ok' : 'extractable'; }],
+    ['indexedDB', () => new Promise((res, rej) => { const q = indexedDB.open('probe-api'); q.onsuccess = () => res('open'); q.onerror = () => rej(q.error); })],
+    ['localStorage', () => (localStorage.setItem('probe-api', '1'), 'rw')],
+    ['cookie', () => { document.cookie = 'probe=1; SameSite=None; Secure'; return document.cookie ? 'set' : 'ignored'; }],
+    ['caches', async () => (await caches.keys(), 'ok')],
+    ['OPFS', async () => (await navigator.storage.getDirectory(), 'ok')],
+    ['storage.persisted', () => navigator.storage.persisted()],
+    ['storage.estimate', async () => { const e = await navigator.storage.estimate(); return Math.round(e.quota / 1048576) + ' MB quota'; }],
+    ['locks', () => navigator.locks.request('probe', () => 'ok')],
+    ['serviceWorker', () => typeof navigator.serviceWorker === 'undefined' ? 'undefined' : navigator.serviceWorker.getRegistrations().then(r => 'ok (' + r.length + ' regs)')],
+    ['BroadcastChannel', () => typeof BroadcastChannel],
+    ['blob Worker', () => { const w = new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))); return new Promise(r => { w.onmessage = () => { w.terminate(); r('ok'); }; }); }],
+    ['SharedWorker', () => typeof SharedWorker],
+    ['WebGPU', () => typeof navigator.gpu],
+    ['WebAssembly', () => typeof WebAssembly],
+    ['Notification.permission', () => typeof Notification === 'undefined' ? 'undefined' : Notification.permission],
+    ['perm geolocation', async () => (await navigator.permissions.query({ name: 'geolocation' })).state],
+    ['perm camera', async () => (await navigator.permissions.query({ name: 'camera' })).state],
+    ['showOpenFilePicker', () => typeof self.showOpenFilePicker],
+    ['credentials.create', () => typeof navigator.credentials?.create],
+    ['fetch CORS (*)', async () => (await fetch('https://httpbin.org/get', { cache: 'no-store' })).status],
+    ['hasStorageAccess', () => document.hasStorageAccess ? document.hasStorageAccess() : 'n/a'],
+  ];
+  return Object.fromEntries(await Promise.all(L.map(([k, f]) => t(k, f))));
+}
+
+// ---- persistence: bump a counter in each store; climbing across reloads = persists ----
+async function storageCounters() {
+  const L = [
+    ['localStorage', () => { const n = +(localStorage.getItem('probe-n') || 0) + 1; localStorage.setItem('probe-n', n); return n; }],
+    ['indexedDB', () => new Promise((res, rej) => {
+      const q = indexedDB.open('probe', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('kv');
+      q.onerror = () => rej(q.error);
+      q.onsuccess = () => { const tx = q.result.transaction('kv', 'readwrite'), s = tx.objectStore('kv'), g = s.get('n');
+        g.onsuccess = () => { const n = (g.result || 0) + 1; s.put(n, 'n'); tx.oncomplete = () => res(n); }; tx.onerror = () => rej(tx.error); };
+    })],
+    ['caches', async () => { const c = await caches.open('probe'), r = await c.match('/probe-n'); const n = (r ? +(await r.text()) : 0) + 1; await c.put('/probe-n', new Response(String(n))); return n; }],
+    ['OPFS', async () => { const d = await navigator.storage.getDirectory(), h = await d.getFileHandle('probe-n', { create: true });
+      const n = (+(await (await h.getFile()).text()) || 0) + 1; const w = await h.createWritable(); await w.write(String(n)); await w.close(); return n; }],
+    ['cookie', () => { const m = /probe-n=(\d+)/.exec(document.cookie); const n = (m ? +m[1] : 0) + 1;
+      document.cookie = 'probe-n=' + n + '; max-age=31536000; SameSite=None; Secure'; return /probe-n=/.test(document.cookie) ? n : 'ignored'; }],
+  ];
+  return Object.fromEntries(await Promise.all(L.map(([k, f]) => t(k, f))));
+}
+
+// ---- same tests inside a sandboxed (opaque-origin) iframe ----
+function sandboxTests() {
+  return new Promise(resolve => {
+    const f = document.createElement('iframe');
+    f.sandbox = 'allow-scripts';
+    f.className = 'hide';
+    const body = 'const settle=' + settle + ';async function t' + t.toString().slice(t.toString().indexOf('(')) + ';' +
+      apiTests.toString() + ';apiTests().then(r=>parent.postMessage({probeSandbox:r},"*"));';
+    f.srcdoc = '<script>' + body + '</scr' + 'ipt>';
+    const on = e => { if (e.source === f.contentWindow && e.data && e.data.probeSandbox) { removeEventListener('message', on); f.remove(); resolve(e.data.probeSandbox); } };
+    addEventListener('message', on);
+    setTimeout(() => { removeEventListener('message', on); f.remove(); resolve('timeout (srcdoc sandbox blocked?)'); }, 8000);
+    document.body.append(f);
+  });
+}
+
+// ---- hosted frame mode ----
+const FRAMED = new URLSearchParams(location.search).has('frame');
+if (FRAMED) {
+  $('local').classList.add('hide'); $('framed').classList.remove('hide');
+  (async () => {
+    const r = { api: await apiTests(), counters: await storageCounters() };
+    $('fo').textContent = '(reported)';
+    parent.postMessage({ probeFrame: r }, '*');
+  })();
+} else {
+  // ---- local mode ----
+  const show = () => { $('out').textContent = JSON.stringify(R, null, 1); };
+  async function runAll() {
+    R.when = new Date().toISOString();
+    R.ua = navigator.userAgent;
+    R.href = location.href.slice(0, 60) + (location.href.length > 60 ? '...' : '');
+    R.results.top = { api: await apiTests(), counters: await storageCounters() };
+    show();
+    R.results.sandbox = await sandboxTests();
+    show();
+  }
+  $('again').onclick = runAll;
+  $('copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(R, null, 1)); $('copy').textContent = 'Copied'; }
+    catch (e) { $('copy').textContent = 'Copy failed: select the text manually'; }
+  };
+
+  const G = {
+    clipWrite: async () => (await navigator.clipboard.writeText('probe'), 'ok'),
+    clipRead: async () => 'read ' + (await navigator.clipboard.readText()).length + ' chars',
+    geo: () => new Promise((res, rej) => navigator.geolocation.getCurrentPosition(() => res('ok'), e => rej(Object.assign(new Error(e.message), { name: 'GeoError' + e.code })), { timeout: 10000 })),
+    cam: async () => { const s = await navigator.mediaDevices.getUserMedia({ video: true }); s.getTracks().forEach(x => x.stop()); return 'ok'; },
+    notif: () => Notification.requestPermission(),
+    midi: async () => (await navigator.requestMIDIAccess(), 'ok'),
+    wake: async () => { const l = await navigator.wakeLock.request('screen'); await l.release(); return 'ok'; },
+    webauthn: async () => (await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(16)), rp: { name: 'probe' },
+      user: { id: new Uint8Array(4), name: 'probe', displayName: 'probe' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }], timeout: 30000 } }), 'ok'),
+    filePick: async () => { if (self.showOpenFilePicker) { await showOpenFilePicker(); return 'FS Access ok'; }
+      return new Promise(res => { const i = document.createElement('input'); i.type = 'file'; i.onchange = () => res('input[type=file] ok'); i.click(); }); },
+    persist: () => navigator.storage.persist(),
+  };
+  document.querySelectorAll('[data-g]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.g, [, v] = await t(k, G[k]);
+    (R.results.gesture ||= {})[k] = v; b.textContent = k + ': ' + v; show();
+  });
+
+  // hosted frame
+  $('frameUrl').value = FRAME_DEFAULT;
+  $('embed').onclick = () => {
+    const u = $('frameUrl').value.trim();
+    if (!u) return;
+    const url = u + (u.includes('?') ? '&' : '?') + 'frame';
+    $('frameBox').textContent = 'loading...';
+    const f = document.createElement('iframe');
+    f.src = url; f.style.cssText = 'width:100%;height:9rem;border:1px solid #ccc';
+    const on = e => { if (e.source === f.contentWindow && e.data && e.data.probeFrame) { removeEventListener('message', on); R.results.hostedFrame = e.data.probeFrame; show(); } };
+    addEventListener('message', on);
+    $('frameBox').textContent = '';
+    $('frameBox').append(f);
+  };
+  if (FRAME_DEFAULT) setTimeout(() => $('embed').click(), 0);
+
+  $('mkdata').onclick = async () => {
+    const marker = 'const FRAME_DEFAULT = ' + '"";';
+    const src = SRC.replace(marker, 'const FRAME_DEFAULT = ' + JSON.stringify($('frameUrl').value.trim()) + ';');
+    const url = 'data:text/html;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(src)));
+    try { await navigator.clipboard.writeText(url); $('mkdata').textContent = 'Copied (' + url.length + ' chars). Paste into the address bar, then bookmark.'; }
+    catch (e) { $('frameBox').textContent = url; $('mkdata').textContent = 'Clipboard blocked: copy the URL from below'; }
+  };
+
+  $('login').onsubmit = e => { e.preventDefault(); (R.results.gesture ||= {}).loginSubmitted = true; show(); };
+  runAll();
+}
+</script>
+</body></html>
